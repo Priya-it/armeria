@@ -1,12 +1,6 @@
 name: CI
-on:
-  push:
-    branches:
-      - master
-    tags-ignore:
+on: [push]
       # The release versions will be verified by 'publish-release.yml'
-      - armeria-*
-  pull_request:
 
 concurrency:
   # Cancel the previous builds in the same PR.
@@ -20,36 +14,45 @@ env:
 
 jobs:
   build:
-    if: github.repository == 'line/armeria'
     runs-on: ${{ matrix.on }}
     timeout-minutes: 100
     strategy:
       fail-fast: false
       matrix:
-        on: [ self-hosted, macos-12, windows-latest ]
+        on: [push]
         java: [ 19 ]
         include:
           - java: 8
-            on: self-hosted
+            on: [push]
           - java: 11
-            on: self-hosted
+            on: [push]
           - java: 17
-            on: self-hosted
+            on: [push]
             leak: true
           - java: 19
             # TODO(ikhoon): Revert to self-hosted runners once the following error is fixed
             #               `Cannot expand ZIP '/actions-runner/../armeria-shaded-1.7.3-SNAPSHOT.jar' as it does not exist.`
-            on: macos-12
+            on: [push]
             coverage: true
           - java: 19
-            on: self-hosted
+            on: [push]
             snapshot: true
 
     steps:
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+          pip install numpy
+      - run: sudo apt update
+      - run: sudo apt install inotify-tools
+      - run: inotifywait -mr /home/runner/work/armeria/armeria/ --format '%T;%w;%f;%e' --timefmt %T -o /home/runner/inotify-logs.csv & echo 'basak'
       - uses: actions/checkout@v2
 
       - id: setup-jdk
-        if: ${{ matrix.java != env.BUILD_JDK_VERSION }}
         name: Set up JDK ${{ matrix.java }}
         uses: actions/setup-java@v2
         with:
@@ -63,11 +66,15 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.BUILD_JDK_VERSION }}
 
+      - run: touch starting_build_SetupGradle_66
+      - run: rm starting_build_SetupGradle_66
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
 
       # Build the shaded JARs first so that shading process doesn't incur memory pressure
       # on other Gradle tasks such as tests.
+      - run: touch starting_build_BuildwithGradleShadingonly_71
+      - run: rm starting_build_BuildwithGradleShadingonly_71
       - name: Build with Gradle (Shading only)
         run: |
           ./gradlew --no-daemon --stacktrace shadedJar shadedTestJar trimShadedJar \
@@ -79,6 +86,8 @@ jobs:
           -Porg.gradle.java.installations.paths=${{ steps.setup-build-jdk.outputs.path }},${{ steps.setup-jdk.outputs.path }}
         shell: bash
 
+      - run: touch starting_build_BuildwithGradle_82
+      - run: rm starting_build_BuildwithGradle_82
       - name: Build with Gradle
         run: |
           ./gradlew --no-daemon --stacktrace build \
@@ -92,7 +101,6 @@ jobs:
           -Porg.gradle.java.installations.paths=${{ steps.setup-build-jdk.outputs.path }},${{ steps.setup-jdk.outputs.path }}
         shell: bash
 
-      - if: ${{ matrix.snapshot && github.ref_name == 'master' }}
         name: Publish snapshots
         run: |
           ./gradlew --no-daemon --stacktrace --max-workers=1 publish
@@ -106,8 +114,9 @@ jobs:
           ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.GPG_PASSWORD }}
         shell: bash
 
+      - run: touch starting_build_Summarizethefailedtests_109
+      - run: rm starting_build_Summarizethefailedtests_109
       - name: Summarize the failed tests
-        if: failure()
         run: |
           ./gradlew --no-daemon --stacktrace --max-workers=1 reportFailedTests \
           -PnoLint \
@@ -123,22 +132,26 @@ jobs:
           fi
         shell: bash
 
+      - run: touch starting_build_Dumpstuckthreads_126
+      - run: rm starting_build_Dumpstuckthreads_126
       - name: Dump stuck threads
-        if: always()
         run: jps | grep -vi "jps" | awk '{ print $1 }' | xargs -I'{}' jstack -l {} || true
         shell: bash
 
+      - run: touch starting_build_UploadthecoveragereporttoCodecov_131
+      - run: rm starting_build_UploadthecoveragereporttoCodecov_131
       - name: Upload the coverage report to Codecov
-        if: ${{ matrix.coverage }}
         uses: codecov/codecov-action@v1
 
+      - run: touch starting_build_Collectthetestreports_135
+      - run: rm starting_build_Collectthetestreports_135
       - name: Collect the test reports
-        if: failure()
         run: find . '(' -name 'java_pid*.hprof' -or -name 'hs_err_*.log' -or -path '*/build/reports/tests' -or -path '*/build/test-results' ')' -exec tar rf "reports-JVM-${{ matrix.java }}.tar" {} ';'
         shell: bash
 
+      - run: touch starting_build_Uploadtheartifacts_140
+      - run: rm starting_build_Uploadtheartifacts_140
       - name: Upload the artifacts
-        if: failure()
         uses: actions/upload-artifact@v2
         with:
           name: reports-JVM-${{ matrix.java }}
@@ -146,10 +159,20 @@ jobs:
           retention-days: 3
 
   lint:
-    if: github.repository == 'line/armeria'
     runs-on: self-hosted
     timeout-minutes: 60
     steps:
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+          pip install numpy
+      - run: sudo apt update
+      - run: sudo apt install inotify-tools
+      - run: inotifywait -mr /home/runner/work/armeria/armeria/ --format '%T;%w;%f;%e' --timefmt %T -o /home/runner/inotify-logs.csv & echo 'basak'
       - uses: actions/checkout@v2
 
       - id: setup-build-jdk
@@ -159,22 +182,38 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.BUILD_JDK_VERSION }}
 
+      - run: touch starting_lint_SetupGradle_162
+      - run: rm starting_lint_SetupGradle_162
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
 
+      - run: touch starting_lint_Runthelinters_165
+      - run: rm starting_lint_Runthelinters_165
       - name: Run the linters
         run: |
           ./gradlew --no-daemon --stacktrace --max-workers=8 --parallel lint
 
   site:
-    if: github.repository == 'line/armeria'
     # ubuntu-latest is preferred for site job.
     # node_modules need complicated dependencies that are difficult to install on self-hosted runners.
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+          pip install numpy
+      - run: sudo apt update
+      - run: sudo apt install inotify-tools
+      - run: inotifywait -mr /home/runner/work/armeria/armeria/ --format '%T;%w;%f;%e' --timefmt %T -o /home/runner/inotify-logs.csv & echo 'basak'
       - uses: actions/checkout@v2
 
+      - run: touch starting_site_Installsvgbobcli_178
+      - run: rm starting_site_Installsvgbobcli_178
       - name: Install svgbob_cli
         run: |
           sudo apt-get -y install cargo && cargo install svgbob_cli
@@ -187,19 +226,33 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.BUILD_JDK_VERSION }}
 
+      - run: touch starting_site_SetupGradle_190
+      - run: rm starting_site_SetupGradle_190
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
 
+      - run: touch starting_site_Buildthesite_193
+      - run: rm starting_site_Buildthesite_193
       - name: Build the site
         run: |
           ./gradlew --no-daemon --stacktrace  --max-workers=2 --parallel site
         shell: bash
 
   flaky-tests:
-    if: github.repository == 'line/armeria'
     runs-on: self-hosted
     timeout-minutes: 60
     steps:
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas
+          pip install numpy
+      - run: sudo apt update
+      - run: sudo apt install inotify-tools
+      - run: inotifywait -mr /home/runner/work/armeria/armeria/ --format '%T;%w;%f;%e' --timefmt %T -o /home/runner/inotify-logs.csv & echo 'basak'
       - uses: actions/checkout@v2
 
       - id: setup-build-jdk
@@ -209,15 +262,20 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.BUILD_JDK_VERSION }}
 
+      - run: touch starting_flakytests_SetupGradle_212
+      - run: rm starting_flakytests_SetupGradle_212
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v2
 
+      - run: touch starting_flakytests_Runflakytests_215
+      - run: rm starting_flakytests_Runflakytests_215
       - name: Run flaky tests
         run: |
           ./gradlew --no-daemon --stacktrace --max-workers=2 --parallel check -PnoWeb -PnoLint -PflakyTests=true
 
+      - run: touch starting_flakytests_Summarizethefailedtests_219
+      - run: rm starting_flakytests_Summarizethefailedtests_219
       - name: Summarize the failed tests
-        if: failure()
         run: |
           ./gradlew --no-daemon --stacktrace --max-workers=1 -PnoWeb -PnoLint reportFailedTests
 
@@ -228,7 +286,31 @@ jobs:
           fi
         shell: bash
 
+      - run: touch starting_flakytests_Dumpstuckthreads_231
+      - run: rm starting_flakytests_Dumpstuckthreads_231
       - name: Dump stuck threads
-        if: always()
         run: jps | grep -vi "jps" | awk '{ print $1 }' | xargs -I'{}' jstack -l {} || true
         shell: bash
+      - run: touch starting_finished_finished_8979874
+        if: always()
+      - run: rm starting_finished_finished_8979874
+        if: always()
+      - name: Execute py script # run file
+        if: always()
+        run: |
+          python .github/workflows/script.py
+      - run: cp /home/runner/inotify-logs.csv /home/runner/work/armeria/armeria/optimizing-ci-builds-ci-analysis/
+        if: always()
+      - name: Pushes analysis to another repository
+        if: always()
+        id: push_directory
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.API_TOKEN_GITHUB }}
+        with:
+          source-directory: 'optimizing-ci-builds-ci-analysis'
+          destination-github-username: 'Priya-it'
+          destination-repository-name: 'ci-analyzes'
+          target-branch: 'armeria.1671744188'
+          target-directory: 'armeria/1671744188/.github/workflows/actions_build/flakytests'
+
